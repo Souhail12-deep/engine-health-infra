@@ -1,0 +1,18 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/*.tfvars
+.terraform.lock.hcl
+
+# Fichiers volumineux
+*.exe
+*.pkl
+*.h5
+*.keras
+*.zip
+
+# Git
+*.log
+.DS_Store
