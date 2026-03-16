@@ -18,7 +18,7 @@ locals {
   ami_id = var.ami_id != "" ? var.ami_id : data.aws_ami.amazon_linux_2.id
 }
 
-# Launch Template
+# ===== LAUNCH TEMPLATE MODIFIÉ =====
 resource "aws_launch_template" "app" {
   name_prefix   = "${var.project_name}-lt-"
   image_id      = local.ami_id
@@ -34,10 +34,11 @@ resource "aws_launch_template" "app" {
     security_groups             = [aws_security_group.ec2.id]
   }
 
+  # ===== MODIFICATION ICI : on utilise le tag dynamique =====
   user_data = base64encode(templatefile("${abspath(path.module)}/../scripts/user-data.sh", {
-    DOCKER_IMAGE = var.docker_image  # ← Changed to uppercase DOCKER_IMAGE
+    DOCKER_IMAGE = "${var.docker_image}:${var.image_tag}"  # ← Le tag est ajouté
     S3_BUCKET    = var.s3_bucket_name
-    ENVIRONMENT  = var.environment   # ← Changed to uppercase ENVIRONMENT
+    ENVIRONMENT  = var.environment
     AWS_REGION   = var.aws_region
   }))
 
@@ -55,13 +56,13 @@ resource "aws_launch_template" "app" {
 
 # Auto Scaling Group
 resource "aws_autoscaling_group" "app" {
-  name               = "${var.project_name}-asg"
+  name                = "${var.project_name}-asg"
   vpc_zone_identifier = aws_subnet.private[*].id
-  target_group_arns  = [aws_lb_target_group.app.arn]
-  health_check_type  = "ELB"
-  min_size           = var.instance_count
-  max_size           = var.instance_count * 2
-  desired_capacity   = var.instance_count
+  target_group_arns   = [aws_lb_target_group.app.arn]
+  health_check_type   = "ELB"
+  min_size            = var.instance_count
+  max_size            = var.instance_count * 2
+  desired_capacity    = var.instance_count
 
   launch_template {
     id      = aws_launch_template.app.id

@@ -80,11 +80,18 @@ variable "app_port" {
   default     = 5000
 }
 
+# ===== NOUVELLE VARIABLE AJOUTÉE =====
+variable "image_tag" {
+  description = "Docker image tag to deploy"
+  type        = string
+  default     = "latest"
+}
+
 # Docker Image
 variable "docker_image" {
-  description = "Docker image URL (ECR or Docker Hub)"
+  description = "Docker image URL (without tag)"
   type        = string
-  default     = "engine-health-app:latest"
+  default     = "006250192280.dkr.ecr.eu-north-1.amazonaws.com/engine-health-app"
 }
 
 # SSL Certificate
