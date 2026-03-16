@@ -71,6 +71,7 @@ variable "ami_id" {
 variable "s3_bucket_name" {
   description = "S3 bucket name for models"
   type        = string
+  default     = "engine-health-models-20260304-112538-28227" 
 }
 
 # Application Configuration

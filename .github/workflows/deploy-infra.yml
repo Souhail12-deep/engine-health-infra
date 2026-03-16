@@ -69,11 +69,12 @@ jobs:
     - name: Terraform Validate
       run: terraform validate
 
-    - name: Terraform Plan
+     - name: Terraform Plan
       id: plan
       run: |
         terraform plan \
           -var="image_tag=${{ steps.get_tag.outputs.tag }}" \
+          -var="s3_bucket_name=engine-health-models-20260304-112538-28227" \
           -no-color \
           -out=tfplan
       continue-on-error: true
@@ -109,9 +110,10 @@ jobs:
       if: steps.plan.outcome == 'failure'
       run: exit 1
 
-    - name: Terraform Apply
+     - name: Terraform Apply
       if: github.event_name == 'repository_dispatch'
       run: |
         echo "íº€ Deploying with image tag: ${{ steps.get_tag.outputs.tag }}"
         terraform apply -auto-approve tfplan || terraform apply -auto-approve \
-          -var="image_tag=${{ steps.get_tag.outputs.tag }}"
+          -var="image_tag=${{ steps.get_tag.outputs.tag }}" \
+          -var="s3_bucket_name=engine-health-models-20260304-112538-28227"
