@@ -1,18 +1,19 @@
 name: Deploy Infrastructure
 
 on:
-  # push:                          â† COMMENTÃ‰ : plus de dÃ©clenchement automatique
-  #   branches: [ main ]
-  #   paths:
-  #     - 'terraform/**'
-  #     - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        default: 'latest'
+  repository_dispatch:
+    types: [new-app-version]
   pull_request:
     branches: [ main ]
     paths:
       - 'terraform/**'
       - 'scripts/**'
-  repository_dispatch:
-    types: [new-app-version]
 
 env:
   AWS_REGION: eu-north-1
@@ -49,15 +50,18 @@ jobs:
       with:
         terraform_version: ${{ env.TF_VERSION }}
 
-    - name: Get image tag from dispatch
+    - name: Get image tag
       id: get_tag
       run: |
-        if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          echo "Using manual tag: ${{ github.event.inputs.image_tag }}"
+        elif [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
           echo "tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
           echo "Using dispatched tag: ${{ github.event.client_payload.image_tag }}"
         else
           echo "tag=latest" >> $GITHUB_OUTPUT
-          echo "Using default tag: latest for PR"
+          echo "Using default tag: latest"
         fi
 
     - name: Terraform Init
@@ -69,7 +73,7 @@ jobs:
     - name: Terraform Validate
       run: terraform validate
 
-     - name: Terraform Plan
+    - name: Terraform Plan
       id: plan
       run: |
         terraform plan \
@@ -110,8 +114,8 @@ jobs:
       if: steps.plan.outcome == 'failure'
       run: exit 1
 
-     - name: Terraform Apply
-      if: github.event_name == 'repository_dispatch'
+    - name: Terraform Apply
+      if: github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
       run: |
         echo "íº€ Deploying with image tag: ${{ steps.get_tag.outputs.tag }}"
         terraform apply -auto-approve tfplan || terraform apply -auto-approve \
