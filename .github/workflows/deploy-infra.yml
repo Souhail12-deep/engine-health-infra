@@ -1,16 +1,16 @@
 name: Deploy Infrastructure
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'terraform/**'
-      - 'scripts/**'
+  # push:                          ← COMMENTÉ : plus de déclenchement automatique
+  #   branches: [ main ]
+  #   paths:
+  #     - 'terraform/**'
+  #     - 'scripts/**'
   pull_request:
     branches: [ main ]
     paths:
       - 'terraform/**'
-  # ===== NOUVEAU DÉCLENCHEUR AJOUTÉ =====
+      - 'scripts/**'
   repository_dispatch:
     types: [new-app-version]
 
@@ -49,7 +49,6 @@ jobs:
       with:
         terraform_version: ${{ env.TF_VERSION }}
 
-    # ===== NOUVELLE ÉTAPE =====
     - name: Get image tag from dispatch
       id: get_tag
       run: |
@@ -58,7 +57,7 @@ jobs:
           echo "Using dispatched tag: ${{ github.event.client_payload.image_tag }}"
         else
           echo "tag=latest" >> $GITHUB_OUTPUT
-          echo "Using default tag: latest"
+          echo "Using default tag: latest for PR"
         fi
 
     - name: Terraform Init
@@ -70,7 +69,6 @@ jobs:
     - name: Terraform Validate
       run: terraform validate
 
-    # ===== TERRAFORM PLAN AVEC LE TAG DYNAMIQUE =====
     - name: Terraform Plan
       id: plan
       run: |
@@ -111,10 +109,9 @@ jobs:
       if: steps.plan.outcome == 'failure'
       run: exit 1
 
-    # ===== TERRAFORM APPLY AVEC LE TAG DYNAMIQUE =====
     - name: Terraform Apply
-      if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'repository_dispatch'
+      if: github.event_name == 'repository_dispatch'
       run: |
-        echo "Applying with image tag: ${{ steps.get_tag.outputs.tag }}"
+        echo "��� Deploying with image tag: ${{ steps.get_tag.outputs.tag }}"
         terraform apply -auto-approve tfplan || terraform apply -auto-approve \
           -var="image_tag=${{ steps.get_tag.outputs.tag }}"
