@@ -45,26 +45,42 @@ aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --
 echo "Pulling Docker image: $DOCKER_IMAGE"
 docker pull $DOCKER_IMAGE
 
-# Create directory for models
+# ========== TÉLÉCHARGEMENT DES MODÈLES ==========
 echo "Creating models directory..."
 mkdir -p /app/models
 
-# Download models from S3
 echo "Downloading models from S3..."
 aws s3 cp s3://$S3_BUCKET/models/ /app/models/ --recursive || echo "Warning: Model download failed, continuing anyway..."
 
-# List downloaded models for debugging
-echo "Models downloaded:"
-ls -la /app/models/
+# ========== TÉLÉCHARGEMENT DES DONNÉES DE SCÉNARIOS ==========
+echo "Creating data directory..."
+mkdir -p /app/data/test
+
+echo "Downloading scenario data from S3..."
+# Essayer différents chemins possibles
+if aws s3 ls s3://$S3_BUCKET/models/scenario_windows.pkl; then
+    aws s3 cp s3://$S3_BUCKET/models/scenario_windows.pkl /app/data/test/ && echo "✅ Scenario data downloaded from models/"
+elif aws s3 ls s3://$S3_BUCKET/scenario_windows.pkl; then
+    aws s3 cp s3://$S3_BUCKET/scenario_windows.pkl /app/data/test/ && echo "✅ Scenario data downloaded from root"
+elif aws s3 ls s3://$S3_BUCKET/data/test/scenario_windows.pkl; then
+    aws s3 cp s3://$S3_BUCKET/data/test/scenario_windows.pkl /app/data/test/ && echo "✅ Scenario data downloaded from data/test/"
+else
+    echo "⚠️ Scenario data not found in S3"
+fi
+
+# ========== VÉRIFICATION DES FICHIERS ==========
+echo "=== Models downloaded ==="
 ls -la /app/models/anodet_models/ 2>/dev/null || echo "No anodet_models found"
 ls -la /app/models/rul_models/ 2>/dev/null || echo "No rul_models found"
+echo "=== Scenario data ==="
+ls -la /app/data/test/ 2>/dev/null || echo "No scenario data found"
 
+# ========== LANCEMENT DU CONTENEUR ==========
 # Stop any existing container
 docker stop engine-health-app || true
 docker rm engine-health-app || true
 
-# Run container with volume mount for models
-echo "Starting container with model volume..."
+echo "Starting container with model and data volumes..."
 docker run -d \
     --name engine-health-app \
     --restart always \
@@ -73,6 +89,7 @@ docker run -d \
     -e ENVIRONMENT=$ENVIRONMENT \
     -e AWS_REGION=$AWS_REGION \
     -v /app/models:/app/models \
+    -v /app/data:/app/data \
     $DOCKER_IMAGE
 
 # Check if container is running
