@@ -15,12 +15,11 @@ env:
   TF_VERSION: '1.5.0'
 
 jobs:
-  # ==================== BLOCK 1: TERRAFORM INIT ====================
-  terraform-init:
-    name: í´§ Terraform Init
+  # ==================== JOB 1: TERRAFORM INIT ====================
+  init:
+    name: 1ï¸âƒ£ Terraform Init
     runs-on: ubuntu-latest
     outputs:
-      working_dir: ${{ steps.set_dir.outputs.dir }}
       image_tag: ${{ steps.get_tag.outputs.tag }}
     
     steps:
@@ -35,13 +34,7 @@ jobs:
         else
           echo "tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
         fi
-        echo "Using image tag: ${{ steps.get_tag.outputs.tag }}"
-    
-    - name: Set working directory
-      id: set_dir
-      run: |
-        echo "dir=terraform/prod" >> $GITHUB_OUTPUT
-        echo "Working directory: terraform/prod"
+        echo "Image tag: ${{ steps.get_tag.outputs.tag }}"
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -56,16 +49,16 @@ jobs:
         terraform_version: ${{ env.TF_VERSION }}
     
     - name: Terraform Init
-      working-directory: ${{ steps.set_dir.outputs.dir }}
       run: |
+        cd terraform/prod
         terraform init
-        echo "âœ… Terraform initialized successfully"
+        echo "âœ… Terraform Init completed"
 
-  # ==================== BLOCK 2: TERRAFORM PLAN ====================
-  terraform-plan:
-    name: í³‹ Terraform Plan
+  # ==================== JOB 2: TERRAFORM PLAN ====================
+  plan:
+    name: 2ï¸âƒ£ Terraform Plan
     runs-on: ubuntu-latest
-    needs: terraform-init
+    needs: init
     
     steps:
     - name: Checkout code
@@ -84,26 +77,26 @@ jobs:
         terraform_version: ${{ env.TF_VERSION }}
     
     - name: Terraform Plan
-      working-directory: terraform/prod
       run: |
+        cd terraform/prod
         terraform plan \
-          -var="image_tag=${{ needs.terraform-init.outputs.image_tag }}" \
+          -var="image_tag=${{ needs.init.outputs.image_tag }}" \
           -no-color \
           -out=tfplan
-        echo "âœ… Terraform plan created"
+        echo "âœ… Terraform Plan completed"
     
-    - name: Upload plan artifact
+    - name: Upload plan
       uses: actions/upload-artifact@v4
       with:
-        name: terraform-plan
+        name: tfplan
         path: terraform/prod/tfplan
         retention-days: 1
 
-  # ==================== BLOCK 3: TERRAFORM APPLY ====================
-  terraform-apply:
-    name: íº€ Terraform Apply
+  # ==================== JOB 3: TERRAFORM APPLY ====================
+  apply:
+    name: 3ï¸âƒ£ Terraform Apply
     runs-on: ubuntu-latest
-    needs: terraform-plan
+    needs: plan
     
     steps:
     - name: Checkout code
@@ -121,25 +114,23 @@ jobs:
       with:
         terraform_version: ${{ env.TF_VERSION }}
     
-    - name: Download plan artifact
+    - name: Download plan
       uses: actions/download-artifact@v4
       with:
-        name: terraform-plan
+        name: tfplan
         path: terraform/prod
     
     - name: Terraform Apply
-      working-directory: terraform/prod
       run: |
+        cd terraform/prod
         terraform apply -auto-approve tfplan
-        echo "âœ… Infrastructure deployed successfully"
+        echo "âœ… Terraform Apply completed"
     
-    - name: Get deployment outputs
-      id: outputs
-      working-directory: terraform/prod
+    - name: Get ALB DNS
       run: |
+        cd terraform/prod
         ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "N/A")
-        echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
         echo "========================================="
-        echo "âœ… Deployment completed!"
+        echo "âœ… Infrastructure deployed!"
         echo "   ALB DNS: $ALB_DNS"
         echo "========================================="
