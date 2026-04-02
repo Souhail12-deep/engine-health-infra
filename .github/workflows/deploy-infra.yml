@@ -9,128 +9,373 @@ on:
         default: 'latest'
   repository_dispatch:
     types: [new-app-version]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'scripts/**'
 
 env:
   AWS_REGION: eu-north-1
   TF_VERSION: '1.5.0'
+  WORKING_DIR: './terraform'
 
 jobs:
-  # ==================== JOB 1: TERRAFORM INIT ====================
-  init:
-    name: 1Ô∏è‚É£ Terraform Init
+  setup:
+    name: Setup Environment
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.get_tag.outputs.tag }}
-    
+      tf_version: ${{ steps.tf_version.outputs.version }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Get image tag
       id: get_tag
       run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
           echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
-        else
+          echo "Using manual tag: ${{ github.event.inputs.image_tag }}"
+        elif [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
           echo "tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
+          echo "Using dispatched tag: ${{ github.event.client_payload.image_tag }}"
+        else
+          echo "tag=latest" >> $GITHUB_OUTPUT
+          echo "Using default tag: latest"
         fi
-        echo "Image tag: ${{ steps.get_tag.outputs.tag }}"
-    
+
+    - name: Set Terraform version
+      id: tf_version
+      run: echo "version=1.5.0" >> $GITHUB_OUTPUT
+
+  terraform-init:
+    name: Terraform Init
+    runs-on: ubuntu-latest
+    needs: setup
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-    
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: ${{ env.TF_VERSION }}
-    
+        terraform_version: ${{ needs.setup.outputs.tf_version }}
+
     - name: Terraform Init
       run: |
-        cd terraform/prod
         terraform init
-        echo "‚úÖ Terraform Init completed"
+        echo "‚úÖ Terraform initialized successfully"
 
-  # ==================== JOB 2: TERRAFORM PLAN ====================
-  plan:
-    name: 2Ô∏è‚É£ Terraform Plan
+    - name: Cache Terraform modules
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.WORKING_DIR }}/.terraform
+        key: ${{ runner.os }}-terraform-${{ hashFiles('${{ env.WORKING_DIR }}/**/*.tf') }}
+
+  terraform-validate:
+    name: Terraform Validate
     runs-on: ubuntu-latest
-    needs: init
-    
+    needs: terraform-init
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-    
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: ${{ env.TF_VERSION }}
-    
-    - name: Terraform Plan
+        terraform_version: ${{ needs.setup.outputs.tf_version }}
+
+    - name: Restore Terraform cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.WORKING_DIR }}/.terraform
+        key: ${{ runner.os }}-terraform-${{ hashFiles('${{ env.WORKING_DIR }}/**/*.tf') }}
+
+    - name: Terraform Format Check
       run: |
-        cd terraform/prod
+        terraform fmt -check -recursive
+        echo "‚úÖ Format check passed"
+
+    - name: Terraform Validate
+      run: |
+        terraform validate
+        echo "‚úÖ Terraform validation passed"
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [setup, terraform-validate]
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    outputs:
+      plan_has_changes: ${{ steps.plan.outputs.has_changes }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ needs.setup.outputs.tf_version }}
+
+    - name: Restore Terraform cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.WORKING_DIR }}/.terraform
+        key: ${{ runner.os }}-terraform-${{ hashFiles('${{ env.WORKING_DIR }}/**/*.tf') }}
+
+    - name: Terraform Plan
+      id: plan
+      run: |
         terraform plan \
-          -var="image_tag=${{ needs.init.outputs.image_tag }}" \
+          -var="image_tag=${{ needs.setup.outputs.image_tag }}" \
+          -var="s3_bucket_name=engine-health-models-20260304-112538-28227" \
           -no-color \
-          -out=tfplan
-        echo "‚úÖ Terraform Plan completed"
-    
-    - name: Upload plan
+          -out=tfplan 2>&1 | tee plan_output.txt
+
+        echo "has_changes=true" >> $GITHUB_OUTPUT
+
+        if grep -q "No changes." plan_output.txt; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "‚ö†Ô∏è No infrastructure changes detected"
+        else
+          echo "Ì≥ù Infrastructure changes detected"
+        fi
+
+    - name: Save plan output
+      run: |
+        terraform show tfplan > readable_plan.txt
+        echo "Plan saved"
+
+    - name: Upload plan artifact
       uses: actions/upload-artifact@v4
       with:
-        name: tfplan
-        path: terraform/prod/tfplan
+        name: terraform-plan
+        path: ${{ env.WORKING_DIR }}/tfplan
         retention-days: 1
 
-  # ==================== JOB 3: TERRAFORM APPLY ====================
-  apply:
-    name: 3Ô∏è‚É£ Terraform Apply
+  comment-plan:
+    name: Comment Plan on PR
     runs-on: ubuntu-latest
-    needs: plan
-    
+    needs: terraform-plan
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
+    - name: Download plan artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-plan
+        path: /tmp
+
+    - name: Generate plan summary
+      id: plan_summary
+      run: |
+        cd ${{ env.WORKING_DIR }}
+        terraform show /tmp/tfplan > plan_summary.txt
+        PLAN_SUMMARY=$(cat plan_summary.txt | head -100)
+        echo "summary<<EOF" >> $GITHUB_OUTPUT
+        echo "$PLAN_SUMMARY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Comment on PR
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const output = `#### Ì≥ã Terraform Plan Summary
+
+          **Image Tag:** ${{ needs.setup.outputs.image_tag }}
+          **Changes Detected:** ${{ needs.terraform-plan.outputs.plan_has_changes }}
+
+          <details><summary>Ì≥ù Click to view plan details</summary>
+
+          \`\`\`terraform
+          ${{ steps.plan_summary.outputs.summary }}
+          \`\`\`
+
+          </details>
+
+          **Status:** ${{ needs.terraform-plan.outputs.plan_has_changes == 'true' ? '‚ö†Ô∏è Changes detected' : '‚úÖ No changes' }}
+
+          *Triggered by: @${{ github.actor }}*
+          *Event: ${{ github.event_name }}*`;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          });
+
+  manual-approval:
+    name: Manual Approval
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.event_name == 'pull_request' && needs.terraform-plan.outputs.plan_has_changes == 'true'
+    environment:
+      name: approval
+      url: ${{ github.event.pull_request.html_url }}
+
+    steps:
+    - name: Wait for approval
+      run: |
+        echo "‚è≥ Waiting for manual approval..."
+        echo "Please review the Terraform plan and approve in GitHub Actions"
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [setup, terraform-plan]
+    if: (github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch') && needs.terraform-plan.outputs.plan_has_changes == 'true'
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-    
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: ${{ env.TF_VERSION }}
-    
-    - name: Download plan
+        terraform_version: ${{ needs.setup.outputs.tf_version }}
+
+    - name: Restore Terraform cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.WORKING_DIR }}/.terraform
+        key: ${{ runner.os }}-terraform-${{ hashFiles('${{ env.WORKING_DIR }}/**/*.tf') }}
+
+    - name: Download plan artifact
       uses: actions/download-artifact@v4
       with:
-        name: tfplan
-        path: terraform/prod
-    
+        name: terraform-plan
+        path: /tmp
+
     - name: Terraform Apply
       run: |
-        cd terraform/prod
-        terraform apply -auto-approve tfplan
-        echo "‚úÖ Terraform Apply completed"
-    
-    - name: Get ALB DNS
+        echo "Ì∫Ä Applying Terraform plan..."
+        terraform apply -auto-approve /tmp/tfplan || terraform apply -auto-approve \
+          -var="image_tag=${{ needs.setup.outputs.image_tag }}" \
+          -var="s3_bucket_name=engine-health-models-20260304-112538-28227"
+        echo "‚úÖ Infrastructure deployment completed"
+
+    - name: Get deployment outputs
       run: |
-        cd terraform/prod
+        echo "alb_dns=$(terraform output -raw alb_dns_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+        echo "ec2_ips=$(terraform output -raw ec2_public_ips 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+
+  verify-deployment:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+    if: always() && needs.terraform-apply.result == 'success'
+
+    steps:
+    - name: Get ALB DNS
+      id: alb
+      run: |
+        cd ${{ env.WORKING_DIR }}
         ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "N/A")
+        echo "dns=$ALB_DNS" >> $GITHUB_OUTPUT
+        echo "ALB DNS: $ALB_DNS"
+
+    - name: Wait for application to be ready
+      if: steps.alb.outputs.dns != 'N/A'
+      run: |
+        ALB_URL="http://${{ steps.alb.outputs.dns }}/health"
+        echo "Checking health endpoint: $ALB_URL"
+
+        for i in {1..30}; do
+          if curl -f -s -o /dev/null "$ALB_URL"; then
+            echo "‚úÖ Application is healthy!"
+            exit 0
+          fi
+          echo "Waiting for app to be ready... ($i/30)"
+          sleep 10
+        done
+        echo "‚ùå Application failed to become healthy"
+        exit 1
+
+    - name: Smoke test prediction endpoint
+      if: steps.alb.outputs.dns != 'N/A'
+      run: |
+        ALB_URL="http://${{ steps.alb.outputs.dns }}/predict"
+        echo "Testing prediction endpoint..."
+
+        curl -X POST "$ALB_URL" \
+          -H "Content-Type: application/json" \
+          -d '{"sensor_data": [1.0, 2.0, 3.0, 4.0]}' \
+          -w "\nHTTP Status: %{http_code}\n"
+
+        echo "‚úÖ Smoke test completed"
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [terraform-apply, verify-deployment]
+    if: always()
+
+    steps:
+    - name: Print deployment summary
+      run: |
         echo "========================================="
-        echo "‚úÖ Infrastructure deployed!"
-        echo "   ALB DNS: $ALB_DNS"
+        echo "Ì≥¶ DEPLOYMENT SUMMARY"
         echo "========================================="
+        echo "Image Tag: ${{ needs.setup.outputs.image_tag }}"
+        echo "Environment: ${{ github.ref == 'refs/heads/main' && 'PROD' || 'DEV' }}"
+        echo "Deployment Status: ${{ needs.terraform-apply.result }}"
+        echo "Verification Status: ${{ needs.verify-deployment.result }}"
+        echo "========================================="
+
+        if [ "${{ needs.terraform-apply.result }}" == "success" ]; then
+          echo "‚úÖ Deployment successful!"
+        else
+          echo "‚ùå Deployment failed!"
+          exit 1
+        fi
