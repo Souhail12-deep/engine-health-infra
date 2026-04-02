@@ -16,3 +16,11 @@ terraform/*.tfvars
 # Git
 *.log
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.backup
+.terraform.lock.hcl
