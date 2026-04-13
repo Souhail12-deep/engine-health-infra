@@ -4,142 +4,73 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Docker image tag to deploy'
+        description: 'Docker image tag'
         required: true
         default: 'latest'
   repository_dispatch:
     types: [new-app-version]
 
-env:
-  AWS_REGION: eu-north-1
-  TF_VERSION: '1.5.0'
-  WORKING_DIR: './terraform'
-
 jobs:
-  # ==================== JOB 1: GET IMAGE TAG ====================
-  setup:
-    name: Get Image Tag
+  PLAN:
+    name: í³‹ Terraform Plan
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.get_tag.outputs.tag }}
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+      - name: Get tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG=${{ github.event.inputs.image_tag }}" >> $GITHUB_ENV
+          else
+            echo "TAG=${{ github.event.client_payload.image_tag }}" >> $GITHUB_ENV
+          fi
+      - name: Init
+        run: cd terraform && terraform init
+      - name: Plan
+        run: cd terraform && terraform plan -var="image_tag=${{ env.TAG }}" -out=tfplan
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/tfplan
 
-    - name: Get image tag
-      id: get_tag
-      run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
-          echo "Using manual tag: ${{ github.event.inputs.image_tag }}"
-        else
-          echo "tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
-          echo "Using dispatched tag: ${{ github.event.client_payload.image_tag }}"
-        fi
-
-  # ==================== JOB 2: TERRAFORM PLAN ====================
-  plan:
-    name: "\U0001F4CB Terraform Plan"
+  APPLY:
+    name: íº€ Terraform Apply
     runs-on: ubuntu-latest
-    needs: setup
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-
-    - name: Terraform Init
-      working-directory: ${{ env.WORKING_DIR }}
-      run: terraform init
-
-    - name: Terraform Plan
-      working-directory: ${{ env.WORKING_DIR }}
-      run: |
-        terraform plan \
-          -var="image_tag=${{ needs.setup.outputs.image_tag }}" \
-          -var="s3_bucket_name=engine-health-models-20260304-112538-28227" \
-          -no-color \
-          -out=tfplan
-        echo "Plan created"
-
-    - name: Upload Plan Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: tfplan
-        path: ${{ env.WORKING_DIR }}/tfplan
-        retention-days: 1
-
-  # ==================== JOB 3: MANUAL APPROVAL ====================
-  approval:
-    name: "Manual Approval"
-    runs-on: ubuntu-latest
-    needs: plan
+    needs: PLAN
     environment: production
-
     steps:
-    - name: Wait for approval
-      run: |
-        echo "========================================="
-        echo "Manual approval required"
-        echo "   Image tag: ${{ needs.setup.outputs.image_tag }}"
-        echo "========================================="
-
-  # ==================== JOB 4: TERRAFORM APPLY ====================
-  apply:
-    name: "\U0001F680 Terraform Apply"
-    runs-on: ubuntu-latest
-    needs: [plan, approval]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-
-    - name: Terraform Init
-      working-directory: ${{ env.WORKING_DIR }}
-      run: terraform init
-
-    - name: Download Plan Artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: tfplan
-        path: ${{ env.WORKING_DIR }}
-
-    - name: Terraform Apply
-      working-directory: ${{ env.WORKING_DIR }}
-      run: |
-        terraform apply -auto-approve tfplan
-        echo "Apply completed"
-
-    - name: Get ALB DNS
-      working-directory: ${{ env.WORKING_DIR }}
-      run: |
-        ALB_DNS=$(terraform output -raw alb_dns_name 2>/dev/null || echo "N/A")
-        echo "========================================="
-        echo "Deployment successful!"
-        echo "   Image tag: ${{ needs.setup.outputs.image_tag }}"
-        echo "   ALB DNS: $ALB_DNS"
-        echo "========================================="
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+      - name: Get tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG=${{ github.event.inputs.image_tag }}" >> $GITHUB_ENV
+          else
+            echo "TAG=${{ github.event.client_payload.image_tag }}" >> $GITHUB_ENV
+          fi
+      - name: Init
+        run: cd terraform && terraform init
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform
+      - name: Apply
+        run: cd terraform && terraform apply -auto-approve tfplan
