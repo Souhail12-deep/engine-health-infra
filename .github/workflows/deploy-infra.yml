@@ -16,17 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
-      
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
-      
       - name: Get tag
         id: tag
         run: |
@@ -35,19 +32,15 @@ jobs:
           else
             echo "TAG=${{ github.event.client_payload.image_tag }}" >> $GITHUB_ENV
           fi
-      
-      - name: Terraform Init
+      - name: Init
         run: cd terraform && terraform init
-      
-      - name: Terraform Plan
+      - name: Plan
         run: cd terraform && terraform plan -var="image_tag=${{ env.TAG }}" -out=tfplan
-      
-      - name: Upload Terraform Plan
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
           path: terraform/tfplan
-          retention-days: 7
 
   APPLY:
     name: APPLY - Terraform Apply
@@ -56,17 +49,14 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
-      
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
-      
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
-      
       - name: Get tag
         id: tag
         run: |
@@ -75,15 +65,12 @@ jobs:
           else
             echo "TAG=${{ github.event.client_payload.image_tag }}" >> $GITHUB_ENV
           fi
-      
-      - name: Terraform Init
+      - name: Init
         run: cd terraform && terraform init
-      
-      - name: Download Terraform Plan
+      - name: Download
         uses: actions/download-artifact@v4
         with:
           name: tfplan
           path: terraform
-      
-      - name: Terraform Apply
+      - name: Apply
         run: cd terraform && terraform apply -auto-approve tfplan
