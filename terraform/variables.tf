@@ -58,7 +58,7 @@ variable "instance_count" {
 variable "key_name" {
   description = "Key pair name for SSH access"
   type        = string
-  default     = ""
+  default     = ""   # ← set to empty string to disable SSH key
 }
 
 variable "ami_id" {
@@ -71,7 +71,7 @@ variable "ami_id" {
 variable "s3_bucket_name" {
   description = "S3 bucket name for models"
   type        = string
-  default     = "engine-health-models-20260304-112538-28227" 
+  default     = "engine-health-models-20250618"   # ← change to your unique bucket
 }
 
 # Application Configuration
