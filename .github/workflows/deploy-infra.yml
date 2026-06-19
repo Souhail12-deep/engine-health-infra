@@ -1,6 +1,8 @@
 name: Deploy Infrastructure
 
 on:
+  push:
+    branches: [ main, develop ]   # ← AJOUTÉ pour tester
   workflow_dispatch:
     inputs:
       image_tag:
